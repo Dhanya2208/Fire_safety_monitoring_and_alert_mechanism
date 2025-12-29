@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IoT Fire Monitor — Dual Site Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    :root{--bg:#0b1220;--card:#121a2b;--muted:#8ea0c2;--ok:#16a34a;--warn:#dc2626;--accent:#60a5fa}
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto;background:linear-gradient(180deg,#0b1220,#0e1528 30%,#0b1220 100%);color:#e5ecff}
+    .wrap{max-width:1200px;margin:0 auto;padding:24px}
+    h1{font-size:28px;margin:0 0 4px}
+    .sub{color:var(--muted);font-size:14px;margin-bottom:20px}
+    .grid{display:grid;grid-template-columns:1fr 1fr; gap:16px}
+    .card{background:rgba(18,26,43,.9);border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:16px;box-shadow:0 8px 30px rgba(0,0,0,.35)}
+    .row{display:flex;gap:12px;align-items:center}
+    .pill{padding:4px 10px;border-radius:999px;font-weight:600;font-size:12px;border:1px solid rgba(255,255,255,.12)}
+    .ok{background:rgba(22,163,74,.12);color:#86efac;border-color:rgba(134,239,172,.25)}
+    .bad{background:rgba(220,38,38,.12);color:#fecaca;border-color:rgba(254,202,202,.25)}
+    .muted{color:var(--muted)}
+    .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:12px}
+    .metric{background:rgba(255,255,255,.04);padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.06)}
+    .metric h3{margin:0 0 6px;font-size:13px;color:var(--muted);font-weight:600}
+    .metric .v{font-size:22px;font-weight:800}
+    #map{height:360px;border-radius:16px;border:1px solid rgba(255,255,255,.08);}
+    canvas{background:rgba(255,255,255,.02);border-radius:12px;border:1px solid rgba(255,255,255,.06)}
+    .foot{margin-top:18px;color:var(--muted);font-size:12px}
+    .cfg{background:rgba(255,255,255,.03);border:1px dashed rgba(255,255,255,.15);padding:12px;border-radius:12px;margin:10px 0}
+    code{color:#93c5fd}
+    @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Fire Safety Monitoring </h1>
+    <div class="sub">ThingSpeak-powered dashboard for two remote sensors. Live status, charts & map.</div>
+
+    <!--<div class="cfg">
+      <div><strong>Setup:</strong> Edit the constants in <code>CONFIG</code> below with your channel IDs / read keys and set <code>backendUrl</code> to your server. If channels are public, leave readKey blank.</div>
+      <pre id="cfg"></pre>
+    </div>-->
+
+    <div class="grid">
+      <div class="card" id="siteA">
+        <div class="row" style="justify-content:space-between;">
+          <div><div style="font-weight:800;font-size:18px">Site A</div><div class="muted" id="aLast">—</div></div>
+          <div class="pill ok" id="aStatus">SAFE</div>
+        </div>
+        <div class="metrics">
+          <div class="metric"><h3>Temperature (°C)</h3><div class="v" id="aTemp">—</div></div>
+          <div class="metric"><h3>Gas</h3><div class="v" id="aGas">—</div></div>
+          <div class="metric"><h3>Location</h3><div class="v" id="aLoc">—</div></div>
+        </div>
+        <div style="margin-top:14px"><canvas id="chartA" height="140"></canvas></div>
+      </div>
+
+      <div class="card" id="siteB">
+        <div class="row" style="justify-content:space-between;">
+          <div><div style="font-weight:800;font-size:18px">Site B</div><div class="muted" id="bLast">—</div></div>
+          <div class="pill ok" id="bStatus">SAFE</div>
+        </div>
+        <div class="metrics">
+          <div class="metric"><h3>Temperature (°C)</h3><div class="v" id="bTemp">—</div></div>
+          <div class="metric"><h3>Gas</h3><div class="v" id="bGas">—</div></div>
+          <div class="metric"><h3>Location</h3><div class="v" id="bLoc">—</div></div>
+        </div>
+        <div style="margin-top:14px"><canvas id="chartB" height="140"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div style="font-weight:800;font-size:18px;margin-bottom:8px">Map</div>
+      <div id="map"></div>
+      <div class="foot">Markers come from the latest <code>field4/field5</code> (lat/lon) of each channel.</div>
+    </div>
+
+    <div class="foot">Tip: thresholds used here are <code>temp &gt; 45°C</code> or <code>gas &gt; 400</code>.</div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    // ============ CONFIG ============
+    const CONFIG = {
+      A: { channelId: 3053391, readKey: 'T495GT6683Y8066J', label: 'Site A' },
+      B: { channelId: 3053396, readKey: '3Q98MMFXRUK9PDJ9', label: 'Site B' },
+      results: 60,
+      thresholds: { temp: 45, gas: 400 },
+      backendUrl: 'http://localhost:3000' // change if your Node server is deployed
+    };
+   // document.getElementById('cfg').textContent = JSON.stringify(CONFIG, null, 2);
+
+    // ============ Helpers ============
+    function tsUrl(ch, results){
+      const k = ch.readKey ? `&api_key=${ch.readKey}` : '';
+      return `https://api.thingspeak.com/channels/${ch.channelId}/feeds.json?results=${results}${k}`;
+    }
+
+    async function getFeeds(site){
+      const url = tsUrl(site, CONFIG.results);
+      const r = await fetch(url);
+      if(!r.ok) throw new Error('ThingSpeak fetch failed');
+      return r.json();
+    }
+
+    function safeLast(feeds){
+      return (feeds && feeds.length) ? feeds[feeds.length - 1] : {};
+    }
+
+    function parse(feeds){
+      const temp = feeds.map(f => parseFloat(f.field1) || NaN);
+      const gas  = feeds.map(f => parseFloat(f.field2) || NaN);
+      const last = safeLast(feeds);
+      const locText = last.field3 || '—';
+      const lat = parseFloat(last.field4 || '0');
+      const lon = parseFloat(last.field5 || '0');
+      const ts  = feeds.map(f => new Date(f.created_at));
+      return { temp, gas, locText, lat, lon, ts };
+    }
+
+    function formatTime(d){
+      try{ return new Intl.DateTimeFormat(undefined, {hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(d);}catch(e){return d.toLocaleTimeString()}
+    }
+function computeStatus(tempArr, gasArr) {
+  const t = tempArr[tempArr.length - 1];
+  const g = gasArr[gasArr.length - 1];
+
+  if (!isFinite(t) || !isFinite(g)) return false;
+
+  // Both must be above threshold for fire alert
+  const tempHigh = t > CONFIG.thresholds.temp; // e.g., 45
+  const gasHigh  = g > CONFIG.thresholds.gas;  // e.g., 400
+
+  return tempHigh && gasHigh;
+}
+
+    // ============ Telegram alert helper (calls backend) ============
+    async function sendTelegramAlert(siteLabel, temp, gas) {
+      const msg = `${siteLabel} FIRE ALERT! Temp:${temp}°C Gas:${gas}`;
+      try {
+        const r = await fetch(`${CONFIG.backendUrl}/send-telegram`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ message: msg })
+        });
+        const j = await r.json();
+        if (!j.success) {
+          console.error('Failed to send Telegram:', j.error || j);
+        } else {
+          console.log('Telegram sent:', j.data && j.data.result && j.data.result.message_id);
+        }
+      } catch (err) {
+        console.error('Error calling backend for Telegram:', err);
+      }
+    }
+
+    // ============ UI update + alert logic (prevents spam) ============
+    const alertState = { a: false, b: false }; // send once when enters alert, reset when safe
+
+    function updateCard(prefix, data, label){
+  const { temp, gas, ts } = data;
+  const lastTemp = temp[temp.length-1];
+  const lastGas  = gas[gas.length-1];
+
+  document.getElementById(prefix+'Temp').textContent = isFinite(lastTemp) ? lastTemp.toFixed(1) : '—';
+  document.getElementById(prefix+'Gas').textContent  = isFinite(lastGas)  ? Math.round(lastGas) : '—';
+
+  // ✅ Hardcode location for each site
+  const location = (prefix === 'a') ? 'Bangalore, India' : 'Chennai, India';
+  document.getElementById(prefix+'Loc').textContent  = location;
+
+  document.getElementById(prefix==='a'?'aLast':'bLast').textContent = ts.length ? ('Last update · '+formatTime(ts[ts.length-1])) : '—';
+
+  const isAlert = computeStatus(temp, gas);
+  const pill = document.getElementById(prefix==='a'?'aStatus':'bStatus');
+  pill.textContent = isAlert ? 'FIRE ALERT' : 'SAFE';
+  pill.className = 'pill ' + (isAlert ? 'bad' : 'ok');
+
+  if (isAlert && !alertState[prefix]) {
+    alertState[prefix] = true;
+    sendTelegramAlert(label, isFinite(lastTemp)? lastTemp : 'N/A', isFinite(lastGas)? lastGas : 'N/A');
+  }
+  if (!isAlert && alertState[prefix]) {
+    alertState[prefix] = false;
+  }
+}
+
+    // ============ Charts & map ============
+    function makeChart(canvasId, data){
+      const { temp, gas, ts } = data;
+      const labels = ts.map(t=>formatTime(t));
+      const ctx = document.getElementById(canvasId);
+      return new Chart(ctx, {
+        type:'line',
+        data:{ labels, datasets:[
+          { label:'Temperature (°C)', data: temp, tension:.25 },
+          { label:'Gas', data: gas, tension:.25 }
+        ]},
+        options:{ responsive:true, maintainAspectRatio:false, scales:{ x:{ display:false } }, plugins:{ legend:{ labels:{ color:'#cbd5e1' } } } }
+      });
+    }
+
+    let map, markerA, markerB;
+function initMap() {
+  // Centered between Bangalore & Chennai
+  map = L.map('map').setView([12.9716, 77.5946], 6);
+
+  // Add tile layer
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  // Hardcoded coordinates for Bangalore & Chennai
+  const siteAcoords = [12.9716, 77.5946]; // Bangalore
+  const siteBcoords = [13.0827, 80.2707]; // Chennai
+
+  // Add two separate markers
+  markerA = L.marker(siteAcoords).addTo(map).bindPopup("<b>Site A</b><br>Bangalore, India");
+  markerB = L.marker(siteBcoords).addTo(map).bindPopup("<b>Site B</b><br>Chennai, India");
+
+  // Adjust map view to fit both markers
+  const bounds = L.latLngBounds([siteAcoords, siteBcoords]);
+  map.fitBounds(bounds);
+}
+
+  function updateMarkerColors(aAlert, bAlert) {
+  if (markerA) {
+    const iconA = L.divIcon({
+      html: `<div style="background:${aAlert ? 'red' : 'green'};width:16px;height:16px;border-radius:50%"></div>`,
+      className: ''
+    });
+    markerA.setIcon(iconA);
+  }
+  if (markerB) {
+    const iconB = L.divIcon({
+      html: `<div style="background:${bAlert ? 'red' : 'green'};width:16px;height:16px;border-radius:50%"></div>`,
+      className: ''
+    });
+    markerB.setIcon(iconB);
+  }
+}
+
+
+    // ============ Main refresh loop ============
+    let chartA, chartB;
+    async function refreshAll(){
+      try {
+        const [a, b] = await Promise.all([getFeeds(CONFIG.A), getFeeds(CONFIG.B)]);
+        const aData = parse(a.feeds), bData = parse(b.feeds);
+        updateCard('a', aData, CONFIG.A.label);
+        updateCard('b', bData, CONFIG.B.label);
+       updateMarkerColors(computeStatus(aData.temp, aData.gas), computeStatus(bData.temp, bData.gas));
+
+        if (chartA) chartA.destroy();
+        if (chartB) chartB.destroy();
+        chartA = makeChart('chartA', aData);
+        chartB = makeChart('chartB', bData);
+      } catch (err) {
+        console.error('Refresh error:', err);
+      }
+    }
+
+    async function main(){
+      initMap();
+      await refreshAll();         // initial load
+      setInterval(refreshAll, 20000); // refresh every 20s
+    }
+
+    main();
+  </script>
+</body>
+</html>

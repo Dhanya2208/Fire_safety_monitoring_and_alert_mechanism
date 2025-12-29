@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "author": "Dhanya rengar",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 38.4, "left": 4.84, "attrs": {} },
+    { "type": "wokwi-led", "id": "led1", "top": 6, "left": 176.6, "attrs": { "color": "red" } },
+    { "type": "wokwi-dht22", "id": "dht1", "top": 38.7, "left": -149.4, "attrs": {} },
+    { "type": "wokwi-gas-sensor", "id": "gas1", "top": -74.1, "left": -12.2, "attrs": {} }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "dht1:GND", "esp:GND.1", "black", [ "v38.4", "h115.2" ] ],
+    [ "dht1:VCC", "esp:3V3", "red", [ "v-86.4", "h144" ] ],
+    [ "dht1:SDA", "esp:15", "green", [ "v57.6", "h230.5" ] ],
+    [ "gas1:GND", "esp:GND.2", "black", [ "h-19.2", "v104.8" ] ],
+    [ "gas1:VCC", "esp:3V3", "red", [ "h-115.2", "v95.1" ] ],
+    [ "led1:A", "esp:13", "green", [ "v19.2", "h-96" ] ],
+    [ "gas1:AOUT", "esp:34", "green", [ "h-115.2", "v163.2" ] ],
+    [ "led1:C", "esp:GND.2", "green", [ "v9.6", "h0.4" ] ]
+  ],
+  "dependencies": {}
+}
